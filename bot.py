@@ -1,5 +1,4 @@
 import os
-import asyncio
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -75,7 +74,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = data.split("_")
         machine_id = parts[1]
         duration = int(parts[2])
-        await start_machine(query, machine_id, duration)
+        await start_machine(query, machine_id, duration, context)
     
     elif data == "collect":
         await start_collect(query)
@@ -184,7 +183,7 @@ async def show_time_options(query, machine_id: str):
         reply_markup=reply_markup
     )
 
-async def start_machine(query, machine_id: str, duration: int):
+async def start_machine(query, machine_id: str, duration: int, context: ContextTypes.DEFAULT_TYPE):
     """Start using a machine."""
     user = query.from_user
     
@@ -204,9 +203,13 @@ async def start_machine(query, machine_id: str, duration: int):
         parse_mode='Markdown'
     )
     
-    # Schedule notification
-    bot = query.get_bot()
-    asyncio.create_task(schedule_notification(bot, machine_id, user.id, duration))
+    # Schedule notification using job queue
+    context.job_queue.run_once(
+        send_machine_notification,
+        duration * 60,
+        data={'machine_id': machine_id, 'user_id': user.id},
+        name=f"notification_{machine_id}_{user.id}"
+    )
 
 async def start_collect(query):
     """Start the collection process."""
@@ -284,17 +287,18 @@ async def back_to_main(query):
         parse_mode='Markdown'
     )
 
-async def schedule_notification(bot, machine_id: str, user_id: int, duration: int):
-    """Schedule a notification for when the machine finishes."""
-    # Wait for the duration
-    await asyncio.sleep(duration * 60)
+async def send_machine_notification(context: ContextTypes.DEFAULT_TYPE):
+    """Job queue callback to send notification when machine finishes."""
+    job_data = context.job.data
+    machine_id = job_data['machine_id']
+    user_id = job_data['user_id']
     
     # Check if machine is still in use (user might have collected early)
     machine = dm.get_machine_by_id(machine_id)
     if machine and machine['status'] == 'in_use' and machine['user_id'] == str(user_id):
         # Notify the user who started it
         try:
-            await bot.send_message(
+            await context.bot.send_message(
                 chat_id=user_id,
                 text=f"⏰ *Your laundry is ready!*\n\n"
                      f"Machine {machine_id} has finished.\n"
@@ -306,7 +310,7 @@ async def schedule_notification(bot, machine_id: str, user_id: int, duration: in
         
         # Notify all other users
         await notify_all_users(
-            bot,
+            context.bot,
             f"🔔 Machine {machine_id} has finished and will be free soon!"
         )
 
