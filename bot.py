@@ -21,7 +21,7 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 WAITING_FOR_CODE = 1
 
 # Time options (in minutes)
-WASHING_MACHINE_TIMES = [2, 50, 60]
+WASHING_MACHINE_TIMES = [40, 43, 60]
 DRYER_TIMES = [45, 55, 65]
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
