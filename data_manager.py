@@ -172,8 +172,8 @@ def get_status_message() -> str:
     message += "🌀 *Washing Machines:*\n"
     for machine in machines:
         if machine['machine_type'] == 'washing_machine':
-            status_emoji = "✅" if machine['status'] == 'free' else "⏳"
-            status_text = "Free" if machine['status'] == 'free' else "In Use"
+            status_emoji = "✅"
+            status_text = "Free"
             
             if machine['status'] == 'in_use' and machine['end_time']:
                 try:
@@ -181,9 +181,14 @@ def get_status_message() -> str:
                     time_left = end_time - datetime.now()
                     if time_left.total_seconds() > 0:
                         minutes_left = int(time_left.total_seconds() / 60)
-                        status_text += f" ({minutes_left} min left)"
+                        status_emoji = "⏳"
+                        status_text = f"In Use ({minutes_left} min left)"
+                    else:
+                        status_emoji = "🧺"
+                        status_text = "Finished (Ready to collect)"
                 except:
-                    pass
+                    status_emoji = "⏳"
+                    status_text = "In Use"
             
             message += f"{status_emoji} {machine['machine_id']}: {status_text}\n"
     
@@ -191,8 +196,8 @@ def get_status_message() -> str:
     message += "\n🔥 *Dryers:*\n"
     for machine in machines:
         if machine['machine_type'] == 'dryer':
-            status_emoji = "✅" if machine['status'] == 'free' else "⏳"
-            status_text = "Free" if machine['status'] == 'free' else "In Use"
+            status_emoji = "✅"
+            status_text = "Free"
             
             if machine['status'] == 'in_use' and machine['end_time']:
                 try:
@@ -200,9 +205,14 @@ def get_status_message() -> str:
                     time_left = end_time - datetime.now()
                     if time_left.total_seconds() > 0:
                         minutes_left = int(time_left.total_seconds() / 60)
-                        status_text += f" ({minutes_left} min left)"
+                        status_emoji = "⏳"
+                        status_text = f"In Use ({minutes_left} min left)"
+                    else:
+                        status_emoji = "🧺"
+                        status_text = "Finished (Ready to collect)"
                 except:
-                    pass
+                    status_emoji = "⏳"
+                    status_text = "In Use"
             
             message += f"{status_emoji} {machine['machine_id']}: {status_text}\n"
     

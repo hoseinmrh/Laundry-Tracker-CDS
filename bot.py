@@ -76,6 +76,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         duration = int(parts[2])
         await start_machine(query, machine_id, duration, context)
     
+    elif data.startswith("custom_"):
+        # Format: custom_WM1
+        machine_id = data.split("_")[1]
+        await request_custom_time(query, machine_id, context)
+    
     elif data == "collect":
         await start_collect(query)
     
@@ -92,7 +97,7 @@ async def show_status(query):
     keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    await query.message.reply_text(
         status_message,
         reply_markup=reply_markup,
         parse_mode='Markdown'
@@ -107,7 +112,7 @@ async def show_machine_types(query):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    await query.message.reply_text(
         "Select machine type:",
         reply_markup=reply_markup
     )
@@ -130,7 +135,7 @@ async def show_washing_machines(query):
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_to_machines")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    await query.message.reply_text(
         "🌀 *Washing Machines*\n\nSelect a free machine:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
@@ -154,7 +159,7 @@ async def show_dryers(query):
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_to_machines")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    await query.message.reply_text(
         "🔥 *Dryers*\n\nSelect a free machine:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
@@ -175,12 +180,30 @@ async def show_time_options(query, machine_id: str):
     for time in times:
         keyboard.append([InlineKeyboardButton(f"{time} minutes", callback_data=f"time_{machine_id}_{time}")])
     
+    # Add custom time option
+    keyboard.append([InlineKeyboardButton("✏️ Custom Time", callback_data=f"custom_{machine_id}")])
     keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back_to_machines")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    await query.message.reply_text(
         title,
         reply_markup=reply_markup
+    )
+
+async def request_custom_time(query, machine_id: str, context: ContextTypes.DEFAULT_TYPE):
+    """Request custom time input from user."""
+    # Store machine_id in user_data
+    context.user_data['waiting_custom_time'] = machine_id
+    
+    keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="back_to_main")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.message.reply_text(
+        f"✏️ *Custom Time for {machine_id}*\n\n"
+        f"Please enter the duration in minutes (as a number).\n\n"
+        f"Example: `45` or `90`",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
     )
 
 async def start_machine(query, machine_id: str, duration: int, context: ContextTypes.DEFAULT_TYPE):
@@ -193,7 +216,7 @@ async def start_machine(query, machine_id: str, duration: int, context: ContextT
     keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    await query.message.reply_text(
         f"✅ *Machine {machine_id} is now reserved for you!*\n\n"
         f"⏱ Duration: {duration} minutes\n"
         f"🔑 Your collection code: `{code}`\n\n"
@@ -216,7 +239,7 @@ async def start_collect(query):
     keyboard = [[InlineKeyboardButton("🔙 Cancel", callback_data="back_to_main")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    await query.message.reply_text(
         "✅ *Collect Laundry*\n\n"
         "Please send me your 6-digit collection code.\n\n"
         "Format: `XXXXXX`",
@@ -225,8 +248,65 @@ async def start_collect(query):
     )
 
 async def handle_code_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle code input from user."""
-    code = update.message.text.strip().upper()
+    """Handle code input from user or custom time."""
+    text = update.message.text.strip()
+    user = update.effective_user
+    
+    # Check if user is entering custom time
+    if 'waiting_custom_time' in context.user_data:
+        machine_id = context.user_data['waiting_custom_time']
+        
+        # Try to parse as integer
+        try:
+            duration = int(text)
+            if duration <= 0 or duration > 300:  # Max 5 hours
+                keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await update.message.reply_text(
+                    "❌ Please enter a valid duration between 1 and 300 minutes.",
+                    reply_markup=reply_markup
+                )
+                return
+            
+            # Clear the waiting state
+            del context.user_data['waiting_custom_time']
+            
+            # Start the machine with custom time
+            code = dm.use_machine(machine_id, user.id, user.username, duration)
+            
+            keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                f"✅ *Machine {machine_id} is now reserved for you!*\n\n"
+                f"⏱ Duration: {duration} minutes\n"
+                f"🔑 Your collection code: `{code}`\n\n"
+                f"_Please save this code. You'll need it to collect your laundry._\n\n"
+                f"You'll receive a notification when it's finished!",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            
+            # Schedule notification using job queue
+            context.job_queue.run_once(
+                send_machine_notification,
+                duration * 60,
+                data={'machine_id': machine_id, 'user_id': user.id},
+                name=f"notification_{machine_id}_{user.id}"
+            )
+            return
+            
+        except ValueError:
+            keyboard = [[InlineKeyboardButton("🔙 Back to Menu", callback_data="back_to_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text(
+                "❌ Invalid format. Please enter a number (e.g., 45 or 90).",
+                reply_markup=reply_markup
+            )
+            return
+    
+    # Otherwise, treat as collection code
+    code = text.upper()
     user = update.effective_user
     
     # Find which machine has this code
@@ -281,7 +361,7 @@ async def back_to_main(query):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await query.edit_message_text(
+    await query.message.reply_text(
         "🧺 *Laundry Room Manager*\n\nWhat would you like to do?",
         reply_markup=reply_markup,
         parse_mode='Markdown'
